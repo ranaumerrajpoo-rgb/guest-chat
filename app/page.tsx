@@ -12,7 +12,7 @@ type Message = {
   created_at: string;
 };
 
-// 🔊 Sweet notification chime using Web Audio API (Zero external MP3 dependencies)
+// 🔊 Audio Ringtone Synthesizer
 function playMessageTone() {
   try {
     const AudioContextClass =
@@ -29,7 +29,6 @@ function playMessageTone() {
     osc1.type = "sine";
     osc2.type = "triangle";
 
-    // Pleasant two-tone chime (E5 -> G#5)
     osc1.frequency.setValueAtTime(659.25, ctx.currentTime);
     osc1.frequency.exponentialRampToValueAtTime(830.61, ctx.currentTime + 0.12);
 
@@ -52,6 +51,32 @@ function playMessageTone() {
   }
 }
 
+// 📲 Mobile Notification Bar Trigger
+function triggerMobileNotification(messageText: string) {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+
+  if (Notification.permission === "granted") {
+    // Agar Service Worker register hai to uske zariye notification dikhayein
+    if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.ready.then((registration) => {
+        registration.showNotification("Aqsa Service Provider", {
+          body: messageText,
+          icon: "/favicon.ico",
+          badge: "/favicon.ico",
+          vibrate: [200, 100, 200],
+          tag: "chat-reply",
+        } as NotificationOptions);
+      });
+    } else {
+      // Fallback normal Notification
+      new Notification("Aqsa Service Provider", {
+        body: messageText,
+        icon: "/favicon.ico",
+      });
+    }
+  }
+}
+
 export default function Home() {
   const [sessionId, setSessionId] = useState("");
   const [guestId, setGuestId] = useState("");
@@ -68,14 +93,30 @@ export default function Home() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
 
+  // 🔔 Register Service Worker & Ask for Mobile Notification Permission
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch((err) => {
+        console.log("Service Worker registration failed:", err);
+      });
+    }
+  }, []);
+
   /*
    * =========================================================
-   * START GUEST SESSION
+   * START GUEST SESSION & ASK PERMISSION
    * =========================================================
    */
   async function startGuestSession() {
     const name = guestName.trim();
     if (!name) return;
+
+    // Ask for Notification permission on button click
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+        Notification.requestPermission();
+      }
+    }
 
     try {
       setStatus("Connecting...");
@@ -110,6 +151,11 @@ export default function Home() {
   }
 
   function openChat() {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+    }
     setChatOpen(true);
   }
 
@@ -183,7 +229,7 @@ export default function Home() {
 
   /*
    * =========================================================
-   * SUPABASE REALTIME + NOTIFICATION SOUND ON ADMIN MESSAGE
+   * REALTIME: ADMIN MESSAGE -> SOUND + MOBILE NOTIFICATION BAR
    * =========================================================
    */
   useEffect(() => {
@@ -204,9 +250,10 @@ export default function Home() {
         (payload) => {
           const newMessage = payload.new as Message;
 
-          // 🔔 Play notification ringtone if message is from Admin
+          // 📲 Admin reply par Sound + Mobile Notification Bar popup
           if (newMessage.sender_type === "admin") {
             playMessageTone();
+            triggerMobileNotification(newMessage.message);
           }
 
           setMessages((current) => {
@@ -274,11 +321,6 @@ export default function Home() {
     }
   }
 
-  /*
-   * =========================================================
-   * SCROLL CHAT TO BOTTOM
-   * =========================================================
-   */
   useEffect(() => {
     const element = document.getElementById("aqsa-chat-messages");
     if (element) {
@@ -485,7 +527,6 @@ export default function Home() {
       {/* CHAT WINDOW */}
       {chatOpen && (
         <div className="fixed bottom-4 right-4 z-[60] flex h-[min(650px,calc(100vh-32px))] w-[calc(100vw-32px)] max-w-[390px] flex-col overflow-hidden rounded-3xl border border-[#e6d5df] bg-white shadow-2xl">
-          {/* CHAT HEADER */}
           <div className="bg-gradient-to-r from-[#32113f] to-[#7b326d] px-5 py-4 text-white">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -512,7 +553,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* MESSAGES */}
           <div id="aqsa-chat-messages" className="flex-1 space-y-3 overflow-y-auto bg-[#fffafd] p-4">
             {chatLoading ? (
               <div className="flex h-full items-center justify-center text-sm text-gray-400">Loading conversation...</div>
@@ -550,7 +590,6 @@ export default function Home() {
             )}
           </div>
 
-          {/* INPUT */}
           <div className="border-t bg-white p-3">
             <div className="flex items-end gap-2">
               <textarea
