@@ -12,6 +12,46 @@ type Message = {
   created_at: string;
 };
 
+// 🔊 Sweet notification chime using Web Audio API (Zero external MP3 dependencies)
+function playMessageTone() {
+  try {
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc1.type = "sine";
+    osc2.type = "triangle";
+
+    // Pleasant two-tone chime (E5 -> G#5)
+    osc1.frequency.setValueAtTime(659.25, ctx.currentTime);
+    osc1.frequency.exponentialRampToValueAtTime(830.61, ctx.currentTime + 0.12);
+
+    osc2.frequency.setValueAtTime(659.25, ctx.currentTime);
+    osc2.frequency.exponentialRampToValueAtTime(830.61, ctx.currentTime + 0.12);
+
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc1.start(ctx.currentTime);
+    osc2.start(ctx.currentTime);
+    osc1.stop(ctx.currentTime + 0.5);
+    osc2.stop(ctx.currentTime + 0.5);
+  } catch (e) {
+    console.error("Audio playback error:", e);
+  }
+}
+
 export default function Home() {
   const [sessionId, setSessionId] = useState("");
   const [guestId, setGuestId] = useState("");
@@ -33,25 +73,18 @@ export default function Home() {
    * START GUEST SESSION
    * =========================================================
    */
-
   async function startGuestSession() {
     const name = guestName.trim();
-
-    if (!name) {
-      return;
-    }
+    if (!name) return;
 
     try {
       setStatus("Connecting...");
-
       const id = getGuestSessionId();
       setSessionId(id);
 
       const response = await fetch("/api/guest/session", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: id,
           guest_name: name,
@@ -67,7 +100,6 @@ export default function Home() {
       setGuestId(data.guest_id || "");
       setConversationId(data.conversation_id || "");
       setGuestName(data.guest_name || name);
-
       setNameSubmitted(true);
       setStatus("Online");
     } catch (error) {
@@ -77,7 +109,6 @@ export default function Home() {
     }
   }
 
-  /* Helper function to open chat only if name is provided */
   function openChat() {
     setChatOpen(true);
   }
@@ -87,7 +118,6 @@ export default function Home() {
    * CONNECT EXISTING GUEST SESSION
    * =========================================================
    */
-
   useEffect(() => {
     async function connectGuest() {
       try {
@@ -96,12 +126,8 @@ export default function Home() {
 
         const response = await fetch("/api/guest/session", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            session_id: id,
-          }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: id }),
         });
 
         const data = await response.json();
@@ -129,11 +155,8 @@ export default function Home() {
    * LOAD EXISTING MESSAGES
    * =========================================================
    */
-
   useEffect(() => {
-    if (!conversationId) {
-      return;
-    }
+    if (!conversationId) return;
 
     async function loadMessages() {
       try {
@@ -144,14 +167,9 @@ export default function Home() {
           .from("messages")
           .select("id, conversation_id, sender_type, message, created_at")
           .eq("conversation_id", conversationId)
-          .order("created_at", {
-            ascending: true,
-          });
+          .order("created_at", { ascending: true });
 
-        if (error) {
-          throw error;
-        }
-
+        if (error) throw error;
         setMessages((data || []) as Message[]);
       } catch (error) {
         console.error("Load guest messages error:", error);
@@ -165,14 +183,11 @@ export default function Home() {
 
   /*
    * =========================================================
-   * SUPABASE REALTIME
+   * SUPABASE REALTIME + NOTIFICATION SOUND ON ADMIN MESSAGE
    * =========================================================
    */
-
   useEffect(() => {
-    if (!conversationId) {
-      return;
-    }
+    if (!conversationId) return;
 
     const supabase = createSupabaseBrowserClient();
 
@@ -189,15 +204,16 @@ export default function Home() {
         (payload) => {
           const newMessage = payload.new as Message;
 
+          // 🔔 Play notification ringtone if message is from Admin
+          if (newMessage.sender_type === "admin") {
+            playMessageTone();
+          }
+
           setMessages((current) => {
             const alreadyExists = current.some(
               (message) => message.id === newMessage.id
             );
-
-            if (alreadyExists) {
-              return current;
-            }
-
+            if (alreadyExists) return current;
             return [...current, newMessage];
           });
         }
@@ -214,22 +230,16 @@ export default function Home() {
    * SEND GUEST MESSAGE
    * =========================================================
    */
-
   async function sendMessage() {
     const text = messageText.trim();
-
-    if (!text || !sessionId || sending || !conversationId) {
-      return;
-    }
+    if (!text || !sessionId || sending || !conversationId) return;
 
     setSending(true);
 
     try {
       const response = await fetch("/api/guest/message", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: sessionId,
           message: text,
@@ -237,21 +247,13 @@ export default function Home() {
       });
 
       const data = await response.json();
-
       if (!response.ok) {
         throw new Error(data.error || "Unable to send message");
       }
 
       if (data.message) {
         setMessages((current) => {
-          const alreadyExists = current.some(
-            (message) => message.id === data.message.id
-          );
-
-          if (alreadyExists) {
-            return current;
-          }
-
+          if (current.some((m) => m.id === data.message.id)) return current;
           return [...current, data.message];
         });
       }
@@ -265,12 +267,6 @@ export default function Home() {
     }
   }
 
-  /*
-   * =========================================================
-   * ENTER TO SEND
-   * =========================================================
-   */
-
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -283,20 +279,16 @@ export default function Home() {
    * SCROLL CHAT TO BOTTOM
    * =========================================================
    */
-
   useEffect(() => {
     const element = document.getElementById("aqsa-chat-messages");
-    if (!element) return;
-    element.scrollTop = element.scrollHeight;
+    if (element) {
+      element.scrollTop = element.scrollHeight;
+    }
   }, [messages]);
 
   return (
     <main className="min-h-screen bg-[#fff8fb] text-[#24152d]">
-
-      {/* =====================================================
-          NAME POPUP (Jab tak name enter na ho)
-      ====================================================== */}
-
+      {/* NAME POPUP */}
       {!nameSubmitted && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl">
@@ -353,10 +345,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* =====================================================
-          NAVBAR
-      ====================================================== */}
-
+      {/* NAVBAR */}
       <nav className="fixed left-0 right-0 top-0 z-40 border-b border-white/20 bg-[#32113f]/95 text-white backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
           <a href="#home" className="flex items-center gap-3">
@@ -395,10 +384,7 @@ export default function Home() {
         </div>
       </nav>
 
-      {/* =====================================================
-          HERO
-      ====================================================== */}
-
+      {/* HERO */}
       <section
         id="home"
         className="relative overflow-hidden bg-gradient-to-br from-[#32113f] via-[#5b1d68] to-[#8f3d75] pt-32 text-white"
@@ -456,10 +442,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* =====================================================
-          SERVICES
-      ====================================================== */}
-
+      {/* SERVICES */}
       <section id="services" className="bg-[#fff8fb] px-5 py-20">
         <div className="mx-auto max-w-7xl">
           <div className="mx-auto max-w-2xl text-center">
@@ -487,10 +470,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* =====================================================
-          FLOATING CHAT BUTTON
-      ====================================================== */}
-
+      {/* FLOATING CHAT BUTTON */}
       {!chatOpen && (
         <button
           onClick={openChat}
@@ -502,14 +482,10 @@ export default function Home() {
         </button>
       )}
 
-      {/* =====================================================
-          CHAT WINDOW
-      ====================================================== */}
-
+      {/* CHAT WINDOW */}
       {chatOpen && (
         <div className="fixed bottom-4 right-4 z-[60] flex h-[min(650px,calc(100vh-32px))] w-[calc(100vw-32px)] max-w-[390px] flex-col overflow-hidden rounded-3xl border border-[#e6d5df] bg-white shadow-2xl">
-
-          {/* CHAT HEADER (UPDATED WITH GUEST NAME) */}
+          {/* CHAT HEADER */}
           <div className="bg-gradient-to-r from-[#32113f] to-[#7b326d] px-5 py-4 text-white">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
